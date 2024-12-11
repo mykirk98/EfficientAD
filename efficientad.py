@@ -16,27 +16,16 @@ from sklearn.metrics import roc_auc_score
 
 def get_argparse():
     parser = argparse.ArgumentParser()
-    parser.add_argument('-d', '--dataset', default='mvtec_ad',
-                        choices=['mvtec_ad', 'mvtec_loco'])
-    parser.add_argument('-s', '--subdataset', default='bottle',
-                        help='One of 15 sub-datasets of Mvtec AD or 5' +
-                             'sub-datasets of Mvtec LOCO')
-    parser.add_argument('-o', '--output_dir', default='output/1')
-    parser.add_argument('-m', '--model_size', default='small',
-                        choices=['small', 'medium'])
-    parser.add_argument('-w', '--weights', default='models/teacher_small.pth')
-    parser.add_argument('-i', '--imagenet_train_path',
-                        default='none',
-                        help='Set to "none" to disable ImageNet' +
-                             'pretraining penalty. Or see README.md to' +
-                             'download ImageNet and set to ImageNet path')
-    parser.add_argument('-a', '--mvtec_ad_path',
-                        default='./mvtec_anomaly_detection',
-                        help='Downloaded Mvtec AD dataset')
-    parser.add_argument('-b', '--mvtec_loco_path',
-                        default='./mvtec_loco_anomaly_detection',
-                        help='Downloaded Mvtec LOCO dataset')
-    parser.add_argument('-t', '--train_steps', type=int, default=70000)
+    parser.add_argument('--dataset', default='mvtec_ad', choices=['mvtec_ad', 'mvtec_loco'])
+    parser.add_argument('--subdataset', default='bottle', help='One of 15 sub-datasets of Mvtec AD or 5 sub-datasets of Mvtec LOCO')
+    parser.add_argument('--output_dir', default='output/1')
+    parser.add_argument('--model_size', default='small', choices=['small', 'medium'])
+    parser.add_argument('--weights', default='models/teacher_small.pth')
+    parser.add_argument('--imagenet_train_path', default='none', help='Set to "none" to disable ImageNet pretraining penalty. Or see README.md to download ImageNet and set to ImageNet path')
+    parser.add_argument('--mvtec_ad_path', default='./mvtec_anomaly_detection', help='Downloaded Mvtec AD dataset')
+    parser.add_argument('--mvtec_loco_path', default='./mvtec_loco_anomaly_detection', help='Downloaded Mvtec LOCO dataset')
+    parser.add_argument('--train_steps', type=int, default=70000)
+    
     return parser.parse_args()
 
 # constants
