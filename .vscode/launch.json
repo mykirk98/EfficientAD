@@ -18,13 +18,16 @@
             "program": "efficientad.py",
             "console": "integratedTerminal",
             "args": [
-                "--dataset",        "/home/msis/Work/dataset/MVTec_AD",
-                "--subdataset",     "bottle",
-                "--output_dir",     "./output/1",
-                "--model_size",     "small",
-                "--weights",        "./models/teacher_small.pth",
-                "--"
-
+                "--dataset",                "MVTec_AD",
+                "--subdataset",             "bottle",
+                "--output_dir",             "./output/ex",
+                "--model_size",             "small",
+                "--weights",                "./models/teacher_small.pth",
+                // "--weights",                "/home/msis/Work/anomalyDetector/EfficientAD/output/1/trainings/MVTec_AD/bottle/teacher_final.pth",
+                "--imagenet_train_path",    "none",
+                "--mvtec_ad_path",          "/home/msis/Work/dataset/MVTec_AD",
+                "--mvtec_loco_path",          "/home/msis/Work/dataset/MVTec_LOCO_AD",
+                "--train_steps",            "10"
             ]
         }
     ]
