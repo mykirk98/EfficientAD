@@ -13,20 +13,8 @@ from tqdm import tqdm
 from common import get_autoencoder, get_pdn_small, get_pdn_medium, \
     ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
 from sklearn.metrics import roc_auc_score
-
-def get_argparse():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset', default='mvtec_ad', choices=['mvtec_ad', 'mvtec_loco'])
-    parser.add_argument('--subdataset', default='bottle', help='One of 15 sub-datasets of Mvtec AD or 5 sub-datasets of Mvtec LOCO')
-    parser.add_argument('--output_dir', default='output/1')
-    parser.add_argument('--model_size', default='small', choices=['small', 'medium'])
-    parser.add_argument('--weights', default='models/teacher_small.pth')
-    parser.add_argument('--imagenet_train_path', default='none', help='Set to "none" to disable ImageNet pretraining penalty. Or see README.md to download ImageNet and set to ImageNet path')
-    parser.add_argument('--mvtec_ad_path', default='./mvtec_anomaly_detection', help='Downloaded Mvtec AD dataset')
-    parser.add_argument('--mvtec_loco_path', default='./mvtec_loco_anomaly_detection', help='Downloaded Mvtec LOCO dataset')
-    parser.add_argument('--train_steps', type=int, default=70000)
-    
-    return parser.parse_args()
+from util.hardware import gpu_check
+from util.parser_ import get_argparse
 
 # constants
 seed = 42
@@ -49,16 +37,123 @@ transform_ae = transforms.RandomChoice([
 def train_transform(image):
     return default_transform(image), default_transform(transform_ae(image))
 
+def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
+         q_st_start, q_st_end, q_ae_start, q_ae_end, test_output_dir=None,
+         desc='Running inference'):
+    y_true = []
+    y_score = []
+    for image, target, path in tqdm(test_set, desc=desc):
+        orig_width = image.width
+        orig_height = image.height
+        image = default_transform(image)
+        image = image[None]
+        if on_gpu:
+            image = image.cuda()
+        map_combined, map_st, map_ae = predict(
+            image=image, teacher=teacher, student=student,
+            autoencoder=autoencoder, teacher_mean=teacher_mean,
+            teacher_std=teacher_std, q_st_start=q_st_start, q_st_end=q_st_end,
+            q_ae_start=q_ae_start, q_ae_end=q_ae_end)
+        map_combined = torch.nn.functional.pad(map_combined, (4, 4, 4, 4))
+        map_combined = torch.nn.functional.interpolate(
+            map_combined, (orig_height, orig_width), mode='bilinear')
+        map_combined = map_combined[0, 0].cpu().numpy()
+
+        defect_class = os.path.basename(os.path.dirname(path))
+        if test_output_dir is not None:
+            img_nm = os.path.split(path)[1].split('.')[0]
+            if not os.path.exists(os.path.join(test_output_dir, defect_class)):
+                os.makedirs(os.path.join(test_output_dir, defect_class))
+            file = os.path.join(test_output_dir, defect_class, img_nm + '.tiff')
+            tifffile.imwrite(file, map_combined)
+
+        y_true_image = 0 if defect_class == 'good' else 1
+        y_score_image = np.max(map_combined)
+        y_true.append(y_true_image)
+        y_score.append(y_score_image)
+    auc = roc_auc_score(y_true=y_true, y_score=y_score)
+    return auc * 100
+
+@torch.no_grad()
+def predict(image, teacher, student, autoencoder, teacher_mean, teacher_std,
+            q_st_start=None, q_st_end=None, q_ae_start=None, q_ae_end=None):
+    teacher_output = teacher(image)
+    teacher_output = (teacher_output - teacher_mean) / teacher_std
+    student_output = student(image)
+    autoencoder_output = autoencoder(image)
+    map_st = torch.mean((teacher_output - student_output[:, :out_channels])**2,
+                        dim=1, keepdim=True)
+    map_ae = torch.mean((autoencoder_output -
+                         student_output[:, out_channels:])**2,
+                        dim=1, keepdim=True)
+    if q_st_start is not None:
+        map_st = 0.1 * (map_st - q_st_start) / (q_st_end - q_st_start)
+    if q_ae_start is not None:
+        map_ae = 0.1 * (map_ae - q_ae_start) / (q_ae_end - q_ae_start)
+    map_combined = 0.5 * map_st + 0.5 * map_ae
+    return map_combined, map_st, map_ae
+
+@torch.no_grad()
+def map_normalization(validation_loader, teacher, student, autoencoder,
+                      teacher_mean, teacher_std, desc='Map normalization'):
+    maps_st = []
+    maps_ae = []
+    # ignore augmented ae image
+    for image, _ in tqdm(validation_loader, desc=desc):
+        if on_gpu:
+            image = image.cuda()
+        map_combined, map_st, map_ae = predict(
+            image=image, teacher=teacher, student=student,
+            autoencoder=autoencoder, teacher_mean=teacher_mean,
+            teacher_std=teacher_std)
+        maps_st.append(map_st)
+        maps_ae.append(map_ae)
+    maps_st = torch.cat(maps_st)
+    maps_ae = torch.cat(maps_ae)
+    q_st_start = torch.quantile(maps_st, q=0.9)
+    q_st_end = torch.quantile(maps_st, q=0.995)
+    q_ae_start = torch.quantile(maps_ae, q=0.9)
+    q_ae_end = torch.quantile(maps_ae, q=0.995)
+    return q_st_start, q_st_end, q_ae_start, q_ae_end
+
+@torch.no_grad()
+def teacher_normalization(teacher, train_loader):
+
+    mean_outputs = []
+    for train_image, _ in tqdm(train_loader, desc='Computing mean of features'):
+        if on_gpu:
+            train_image = train_image.cuda()
+        teacher_output = teacher(train_image)
+        mean_output = torch.mean(teacher_output, dim=[0, 2, 3])
+        mean_outputs.append(mean_output)
+    channel_mean = torch.mean(torch.stack(mean_outputs), dim=0)
+    channel_mean = channel_mean[None, :, None, None]
+
+    mean_distances = []
+    for train_image, _ in tqdm(train_loader, desc='Computing std of features'):
+        if on_gpu:
+            train_image = train_image.cuda()
+        teacher_output = teacher(train_image)
+        distance = (teacher_output - channel_mean) ** 2
+        mean_distance = torch.mean(distance, dim=[0, 2, 3])
+        mean_distances.append(mean_distance)
+    channel_var = torch.mean(torch.stack(mean_distances), dim=0)
+    channel_var = channel_var[None, :, None, None]
+    channel_std = torch.sqrt(channel_var)
+
+    return channel_mean, channel_std
+
 def main():
+    gpu_check()
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
 
     config = get_argparse()
 
-    if config.dataset == 'mvtec_ad':
+    if config.dataset == 'MVTec_AD':
         dataset_path = config.mvtec_ad_path
-    elif config.dataset == 'mvtec_loco':
+    elif config.dataset == 'MVTec_LOCO_AD':
         dataset_path = config.mvtec_loco_path
     else:
         raise Exception('Unknown config.dataset')
@@ -72,8 +167,8 @@ def main():
                                     config.dataset, config.subdataset)
     test_output_dir = os.path.join(config.output_dir, 'anomaly_maps',
                                    config.dataset, config.subdataset, 'test')
-    os.makedirs(train_output_dir)
-    os.makedirs(test_output_dir)
+    os.makedirs(train_output_dir, exist_ok=True)
+    os.makedirs(test_output_dir, exist_ok=True)
 
     # load data
     full_train_set = ImageFolderWithoutTarget(
@@ -81,7 +176,7 @@ def main():
         transform=transforms.Lambda(train_transform))
     test_set = ImageFolderWithPath(
         os.path.join(dataset_path, config.subdataset, 'test'))
-    if config.dataset == 'mvtec_ad':
+    if config.dataset == 'MVTec_AD':
         # mvtec dataset paper recommend 10% validation set
         train_size = int(0.9 * len(full_train_set))
         validation_size = len(full_train_set) - train_size
@@ -90,7 +185,7 @@ def main():
                                                            [train_size,
                                                             validation_size],
                                                            rng)
-    elif config.dataset == 'mvtec_loco':
+    elif config.dataset == 'MVTec_LOCO_AD':
         train_set = full_train_set
         validation_set = ImageFolderWithoutTarget(
             os.path.join(dataset_path, config.subdataset, 'validation'),
@@ -99,8 +194,7 @@ def main():
         raise Exception('Unknown config.dataset')
 
 
-    train_loader = DataLoader(train_set, batch_size=1, shuffle=True,
-                              num_workers=4, pin_memory=True)
+    train_loader = DataLoader(train_set, batch_size=1, shuffle=True, num_workers=4, pin_memory=True)
     train_loader_infinite = InfiniteDataloader(train_loader)
     validation_loader = DataLoader(validation_set, batch_size=1)
 
@@ -111,8 +205,7 @@ def main():
             transforms.RandomGrayscale(0.3),
             transforms.CenterCrop(image_size),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224,
-                                                                  0.225])
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
         penalty_set = ImageFolderWithoutTarget(config.imagenet_train_path,
                                                transform=penalty_transform)
@@ -247,112 +340,6 @@ def main():
         q_ae_start=q_ae_start, q_ae_end=q_ae_end,
         test_output_dir=test_output_dir, desc='Final inference')
     print('Final image auc: {:.4f}'.format(auc))
-
-def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
-         q_st_start, q_st_end, q_ae_start, q_ae_end, test_output_dir=None,
-         desc='Running inference'):
-    y_true = []
-    y_score = []
-    for image, target, path in tqdm(test_set, desc=desc):
-        orig_width = image.width
-        orig_height = image.height
-        image = default_transform(image)
-        image = image[None]
-        if on_gpu:
-            image = image.cuda()
-        map_combined, map_st, map_ae = predict(
-            image=image, teacher=teacher, student=student,
-            autoencoder=autoencoder, teacher_mean=teacher_mean,
-            teacher_std=teacher_std, q_st_start=q_st_start, q_st_end=q_st_end,
-            q_ae_start=q_ae_start, q_ae_end=q_ae_end)
-        map_combined = torch.nn.functional.pad(map_combined, (4, 4, 4, 4))
-        map_combined = torch.nn.functional.interpolate(
-            map_combined, (orig_height, orig_width), mode='bilinear')
-        map_combined = map_combined[0, 0].cpu().numpy()
-
-        defect_class = os.path.basename(os.path.dirname(path))
-        if test_output_dir is not None:
-            img_nm = os.path.split(path)[1].split('.')[0]
-            if not os.path.exists(os.path.join(test_output_dir, defect_class)):
-                os.makedirs(os.path.join(test_output_dir, defect_class))
-            file = os.path.join(test_output_dir, defect_class, img_nm + '.tiff')
-            tifffile.imwrite(file, map_combined)
-
-        y_true_image = 0 if defect_class == 'good' else 1
-        y_score_image = np.max(map_combined)
-        y_true.append(y_true_image)
-        y_score.append(y_score_image)
-    auc = roc_auc_score(y_true=y_true, y_score=y_score)
-    return auc * 100
-
-@torch.no_grad()
-def predict(image, teacher, student, autoencoder, teacher_mean, teacher_std,
-            q_st_start=None, q_st_end=None, q_ae_start=None, q_ae_end=None):
-    teacher_output = teacher(image)
-    teacher_output = (teacher_output - teacher_mean) / teacher_std
-    student_output = student(image)
-    autoencoder_output = autoencoder(image)
-    map_st = torch.mean((teacher_output - student_output[:, :out_channels])**2,
-                        dim=1, keepdim=True)
-    map_ae = torch.mean((autoencoder_output -
-                         student_output[:, out_channels:])**2,
-                        dim=1, keepdim=True)
-    if q_st_start is not None:
-        map_st = 0.1 * (map_st - q_st_start) / (q_st_end - q_st_start)
-    if q_ae_start is not None:
-        map_ae = 0.1 * (map_ae - q_ae_start) / (q_ae_end - q_ae_start)
-    map_combined = 0.5 * map_st + 0.5 * map_ae
-    return map_combined, map_st, map_ae
-
-@torch.no_grad()
-def map_normalization(validation_loader, teacher, student, autoencoder,
-                      teacher_mean, teacher_std, desc='Map normalization'):
-    maps_st = []
-    maps_ae = []
-    # ignore augmented ae image
-    for image, _ in tqdm(validation_loader, desc=desc):
-        if on_gpu:
-            image = image.cuda()
-        map_combined, map_st, map_ae = predict(
-            image=image, teacher=teacher, student=student,
-            autoencoder=autoencoder, teacher_mean=teacher_mean,
-            teacher_std=teacher_std)
-        maps_st.append(map_st)
-        maps_ae.append(map_ae)
-    maps_st = torch.cat(maps_st)
-    maps_ae = torch.cat(maps_ae)
-    q_st_start = torch.quantile(maps_st, q=0.9)
-    q_st_end = torch.quantile(maps_st, q=0.995)
-    q_ae_start = torch.quantile(maps_ae, q=0.9)
-    q_ae_end = torch.quantile(maps_ae, q=0.995)
-    return q_st_start, q_st_end, q_ae_start, q_ae_end
-
-@torch.no_grad()
-def teacher_normalization(teacher, train_loader):
-
-    mean_outputs = []
-    for train_image, _ in tqdm(train_loader, desc='Computing mean of features'):
-        if on_gpu:
-            train_image = train_image.cuda()
-        teacher_output = teacher(train_image)
-        mean_output = torch.mean(teacher_output, dim=[0, 2, 3])
-        mean_outputs.append(mean_output)
-    channel_mean = torch.mean(torch.stack(mean_outputs), dim=0)
-    channel_mean = channel_mean[None, :, None, None]
-
-    mean_distances = []
-    for train_image, _ in tqdm(train_loader, desc='Computing std of features'):
-        if on_gpu:
-            train_image = train_image.cuda()
-        teacher_output = teacher(train_image)
-        distance = (teacher_output - channel_mean) ** 2
-        mean_distance = torch.mean(distance, dim=[0, 2, 3])
-        mean_distances.append(mean_distance)
-    channel_var = torch.mean(torch.stack(mean_distances), dim=0)
-    channel_var = channel_var[None, :, None, None]
-    channel_std = torch.sqrt(channel_var)
-
-    return channel_mean, channel_std
 
 if __name__ == '__main__':
     main()
