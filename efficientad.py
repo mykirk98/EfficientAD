@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 import numpy as np
-import torch
+import torch, cv2
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
@@ -63,16 +63,19 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
             if not os.path.exists(os.path.join(test_output_dir, defect_class)):
                 os.makedirs(os.path.join(test_output_dir, defect_class))
                 
-            file = os.path.join(test_output_dir, defect_class, img_nm + '.tiff')
-            tifffile.imwrite(file, map_combined)
+            # file = os.path.join(test_output_dir, defect_class, img_nm + '.tiff')
+            # tifffile.imwrite(file, map_combined)
             
             # ...existing code... 
-            
-            # file = os.path.join(test_output_dir, defect_class, img_nm + '.jpg')
+            # map_combined -= np.min(map_combined)
+            map_combined = (map_combined) / (np.max(map_combined) - np.min(map_combined)) * 255
+            file = os.path.join(test_output_dir, defect_class, img_nm + '.jpg')
+            # TODO: 실행하면 끝
             # map_combined_image = Image.fromarray(np.uint8(map_combined))
+            # map_combined_image = Image.fromarray(map_combined)
             # map_combined_image.save(file, 'JPEG')
             
-            
+            cv2.imwrite(filename=file, img=map_combined)
 
         y_true_image = 0 if defect_class == 'good' else 1
         y_score_image = np.max(map_combined)
