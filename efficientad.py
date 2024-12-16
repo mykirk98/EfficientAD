@@ -11,7 +11,9 @@ from common import get_autoencoder, get_pdn_small, get_pdn_medium, ImageFolderWi
 from sklearn.metrics import roc_auc_score
 from util.hardware import gpu_check
 from util.parser_ import get_argparse
+from util.save_functions import save_original_and_anom_map
 from PIL import Image
+
 
 # constants
 seed = 42
@@ -69,13 +71,10 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
             # ...existing code... 
             # map_combined -= np.min(map_combined)
             map_combined = (map_combined) / (np.max(map_combined) - np.min(map_combined)) * 255
-            file = os.path.join(test_output_dir, defect_class, img_nm + '.jpg')
-
-            # map_combined_image = Image.fromarray(np.uint8(map_combined))
-            # map_combined_image = Image.fromarray(map_combined)
-            # map_combined_image.save(file, 'JPEG')
+            file = os.path.join(test_output_dir, defect_class, img_nm + '.png')
             
             cv2.imwrite(filename=file, img=map_combined)
+            
             
             # TODO: if문으로 만들기
             original_image_path = path
@@ -88,12 +87,12 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
             gt_image = cv2.cvtColor(gt_image, cv2.COLOR_GRAY2BGR)
             
             # map_combined = cv2.applyColorMap(src=np.uint8(map_combined), colormap=cv2.COLORMAP_JET)
-            map_combined = cv2.cvtColor(map_combined, cv2.COLOR_GRAY2BGR)
+            # map_combined = cv2.cvtColor(map_combined, cv2.COLOR_GRAY2BGR)
             
-            stack_mask = np.hstack(tup=[original_image, gt_image, map_combined])
+            # stack_mask = np.hstack(tup=[original_image, gt_image, map_combined])
             
-            cv2.imwrite(filename=file.replace('.jpg', '_stacked.jpg'), img=stack_mask)
-            
+            # cv2.imwrite(filename=file.replace('.jpg', '_stacked.jpg'), img=stack_mask)
+            save_original_and_anom_map(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
 
         y_true_image = 0 if defect_class == 'good' else 1
         y_score_image = np.max(map_combined)
