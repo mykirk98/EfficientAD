@@ -70,12 +70,30 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
             # map_combined -= np.min(map_combined)
             map_combined = (map_combined) / (np.max(map_combined) - np.min(map_combined)) * 255
             file = os.path.join(test_output_dir, defect_class, img_nm + '.jpg')
-            # TODO: 실행하면 끝
+
             # map_combined_image = Image.fromarray(np.uint8(map_combined))
             # map_combined_image = Image.fromarray(map_combined)
             # map_combined_image.save(file, 'JPEG')
             
             cv2.imwrite(filename=file, img=map_combined)
+            
+            # TODO: if문으로 만들기
+            original_image_path = path
+            original_image = Image.open(original_image_path)
+            original_image = np.array(original_image)
+            
+            gt_path = path.replace('test', 'ground_truth').split('.')[0] + '_mask.png'
+            gt_image = Image.open(gt_path)
+            gt_image = np.array(gt_image)
+            gt_image = cv2.cvtColor(gt_image, cv2.COLOR_GRAY2BGR)
+            
+            # map_combined = cv2.applyColorMap(src=np.uint8(map_combined), colormap=cv2.COLORMAP_JET)
+            map_combined = cv2.cvtColor(map_combined, cv2.COLOR_GRAY2BGR)
+            
+            stack_mask = np.hstack(tup=[original_image, gt_image, map_combined])
+            
+            cv2.imwrite(filename=file.replace('.jpg', '_stacked.jpg'), img=stack_mask)
+            
 
         y_true_image = 0 if defect_class == 'good' else 1
         y_score_image = np.max(map_combined)
@@ -248,9 +266,7 @@ def main():
 
     teacher_mean, teacher_std = teacher_normalization(teacher, train_loader)
 
-    optimizer = torch.optim.Adam(itertools.chain(student.parameters(),
-                                                    autoencoder.parameters()),
-                                    lr=1e-4, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(itertools.chain(student.parameters(), autoencoder.parameters()), lr=1e-4, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(0.95 * config.train_steps), gamma=0.1)
     
     tqdm_obj = tqdm(range(config.train_steps))
