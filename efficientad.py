@@ -11,7 +11,7 @@ from common import get_autoencoder, get_pdn_small, get_pdn_medium, ImageFolderWi
 from sklearn.metrics import roc_auc_score
 from util.hardware import gpu_check
 from util.parser_ import get_argparse
-from util.save_functions import save_original_and_anom_map
+from util.save_MVTec_AD import save_original_and_anom_map, save_original_and_anom_map_and_mask
 from PIL import Image
 
 
@@ -75,25 +75,9 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
             
             cv2.imwrite(filename=file, img=map_combined)
             
-            
             # TODO: if문으로 만들기
             original_image_path = path
-            original_image = Image.open(original_image_path)
-            original_image = np.array(original_image)
-            
-            gt_path = path.replace('test', 'ground_truth').split('.')[0] + '_mask.png'
-            gt_image = Image.open(gt_path)
-            gt_image = np.array(gt_image)
-            gt_image = cv2.cvtColor(gt_image, cv2.COLOR_GRAY2BGR)
-            
-            # map_combined = cv2.applyColorMap(src=np.uint8(map_combined), colormap=cv2.COLORMAP_JET)
-            # map_combined = cv2.cvtColor(map_combined, cv2.COLOR_GRAY2BGR)
-            
-            # stack_mask = np.hstack(tup=[original_image, gt_image, map_combined])
-            
-            # cv2.imwrite(filename=file.replace('.jpg', '_stacked.jpg'), img=stack_mask)
-            save_original_and_anom_map(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
-
+            save_original_and_anom_map_and_mask(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
         y_true_image = 0 if defect_class == 'good' else 1
         y_score_image = np.max(map_combined)
         y_true.append(y_true_image)
