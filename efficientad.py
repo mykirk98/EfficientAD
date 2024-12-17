@@ -64,20 +64,16 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
             img_nm = os.path.split(path)[1].split('.')[0]
             if not os.path.exists(os.path.join(test_output_dir, defect_class)):
                 os.makedirs(os.path.join(test_output_dir, defect_class))
-                
-            # file = os.path.join(test_output_dir, defect_class, img_nm + '.tiff')
-            # tifffile.imwrite(file, map_combined)
             
-            # ...existing code... 
-            # map_combined -= np.min(map_combined)
             map_combined = (map_combined) / (np.max(map_combined) - np.min(map_combined)) * 255
+            original_image_path = path
             file = os.path.join(test_output_dir, defect_class, img_nm + '.png')
             
-            cv2.imwrite(filename=file, img=map_combined)
-            
-            # TODO: if문으로 만들기
-            original_image_path = path
-            save_original_and_anom_map_and_mask(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
+            if defect_class == 'good':
+                save_original_and_anom_map(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
+            else:
+                save_original_and_anom_map_and_mask(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
+        
         y_true_image = 0 if defect_class == 'good' else 1
         y_score_image = np.max(map_combined)
         y_true.append(y_true_image)
