@@ -6,13 +6,14 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 import os, random, itertools
-from common import *
+from common import ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
 from sklearn.metrics import roc_auc_score
 from util.hardware import gpu_check, load_json
 from util.parser_ import get_argparse
 # from util.save_MVTec_AD import save_original_and_anom_map, save_original_and_anom_map_and_mask
 from util.figure import loss_figure
 from neuralNetwork.pdn import PDNs, PDNm
+from neuralNetwork.autoEncoder import AutoEncoder
 
 
 # constants
@@ -223,7 +224,7 @@ def main():
     
     state_dict = torch.load(args.weights, map_location='cpu')
     teacher.load_state_dict(state_dict)
-    autoencoder = get_autoencoder(out_channels)
+    autoencoder = AutoEncoder(out_channels)
 
     # teacher frozen
     teacher.eval()
