@@ -9,7 +9,7 @@ import tifffile
 import os, random, itertools
 from common import get_autoencoder, get_pdn_small, get_pdn_medium, ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
 from sklearn.metrics import roc_auc_score
-from util.hardware import gpu_check
+from util.hardware import gpu_check, load_json
 from util.parser_ import get_argparse
 from util.save_MVTec_AD import save_original_and_anom_map, save_original_and_anom_map_and_mask
 from util.figure import loss_figure
@@ -70,11 +70,12 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
             original_image_path = path
             file = os.path.join(test_output_dir, defect_class, img_nm + '.png')
             
-            if defect_class == 'good':
-                save_original_and_anom_map(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
-            else:
-                save_original_and_anom_map_and_mask(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
-        
+            # if defect_class == 'good':
+            #     save_original_and_anom_map(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
+            # else:
+            #     save_original_and_anom_map_and_mask(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
+            cv2.imwrite(filename=file, img=map_combined)    #FIXME: activate when test mode
+
         y_true_image = 0 if defect_class == 'good' else 1
         y_score_image = np.max(map_combined)
         y_true.append(y_true_image)
@@ -163,37 +164,39 @@ def main():
     np.random.seed(seed)
     random.seed(seed)
 
-    config = get_argparse()
+    config_file = load_json(fp='/home/msis/Work/anomalyDetector/EfficientAD/parameters.json')
+    args = get_argparse()
 
-    if config.dataset == 'MVTec_AD':
-        dataset_path = config.mvtec_ad_path
-    elif config.dataset == 'MVTec_LOCO_AD':
-        dataset_path = config.mvtec_loco_path
-    else:
-        raise Exception('Unknown config.dataset')
+    dataset_path = config_file['dataset'][args.dataset]['path']
+    # if args.dataset == 'MVTec_AD':
+    #     dataset_path = args.mvtec_ad_path
+    # elif args.dataset == 'MVTec_LOCO_AD':
+    #     dataset_path = args.mvtec_loco_path
+    # else:
+    #     raise Exception('Unknown config.dataset')
     
-    pretrain_penalty = True if config.imagenet_train_path != 'none' else False
+    pretrain_penalty = True if args.imagenet_train_path != 'none' else False
 
     # create output dir
-    train_output_dir = os.path.join(config.output_dir, 'trainings', config.dataset, config.subdataset)
-    test_output_dir = os.path.join(config.output_dir, 'anomaly_maps', config.dataset, config.subdataset, 'test')
+    train_output_dir = os.path.join(args.output_dir, 'trainings', args.dataset, args.subdataset)
+    test_output_dir = os.path.join(args.output_dir, 'anomaly_maps', args.dataset, args.subdataset, 'test')
     os.makedirs(train_output_dir, exist_ok=True)
     os.makedirs(test_output_dir, exist_ok=True)
 
     # load data
-    full_train_set = ImageFolderWithoutTarget(os.path.join(dataset_path, config.subdataset, 'train'),
+    full_train_set = ImageFolderWithoutTarget(os.path.join(dataset_path, args.subdataset, 'train'),
                                             transform=transforms.Lambda(train_transform))
-    test_set = ImageFolderWithPath(os.path.join(dataset_path, config.subdataset, 'test'))
+    test_set = ImageFolderWithPath(os.path.join(dataset_path, args.subdataset, 'test'))
     
-    if config.dataset == 'MVTec_AD':
+    if args.dataset == 'MVTec_AD':
         # mvtec dataset paper recommend 10% validation set
         train_size = int(0.9 * len(full_train_set))
         validation_size = len(full_train_set) - train_size
         rng = torch.Generator().manual_seed(seed)
         train_set, validation_set = torch.utils.data.random_split(full_train_set, [train_size,validation_size], rng)
-    elif config.dataset == 'MVTec_LOCO_AD':
+    elif args.dataset == 'MVTec_LOCO_AD':
         train_set = full_train_set
-        validation_set = ImageFolderWithoutTarget(os.path.join(dataset_path, config.subdataset, 'validation'),
+        validation_set = ImageFolderWithoutTarget(os.path.join(dataset_path, args.subdataset, 'validation'),
                                                 transform=transforms.Lambda(train_transform))
     else:
         raise Exception('Unknown config.dataset')
@@ -212,23 +215,23 @@ def main():
                                     transforms.ToTensor(),
                                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
                                 ])
-        penalty_set = ImageFolderWithoutTarget(config.imagenet_train_path, transform=penalty_transform)
+        penalty_set = ImageFolderWithoutTarget(args.imagenet_train_path, transform=penalty_transform)
         penalty_loader = DataLoader(penalty_set, batch_size=1, shuffle=True, num_workers=4, pin_memory=True)
         penalty_loader_infinite = InfiniteDataloader(penalty_loader)
     else:
         penalty_loader_infinite = itertools.repeat(None)
 
     # create models
-    if config.model_size == 'small':
+    if args.model_size == 'small':
         teacher = get_pdn_small(out_channels)
         student = get_pdn_small(2 * out_channels)
-    elif config.model_size == 'medium':
+    elif args.model_size == 'medium':
         teacher = get_pdn_medium(out_channels)
         student = get_pdn_medium(2 * out_channels)
     else:
         raise Exception()
     
-    state_dict = torch.load(config.weights, map_location='cpu')
+    state_dict = torch.load(args.weights, map_location='cpu')
     teacher.load_state_dict(state_dict)
     autoencoder = get_autoencoder(out_channels)
 
@@ -245,11 +248,11 @@ def main():
     teacher_mean, teacher_std = teacher_normalization(teacher, train_loader)
 
     optimizer = torch.optim.Adam(itertools.chain(student.parameters(), autoencoder.parameters()), lr=1e-4, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(0.95 * config.train_steps), gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(0.95 * args.train_steps), gamma=0.1)
     
     losses = []
     auces = []
-    tqdm_obj = tqdm(range(config.train_steps))
+    tqdm_obj = tqdm(range(args.train_steps))
     for iteration, (image_st, image_ae), image_penalty in zip(
             tqdm_obj, train_loader_infinite, penalty_loader_infinite):
         if on_gpu:
