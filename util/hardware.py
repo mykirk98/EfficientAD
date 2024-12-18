@@ -1,5 +1,5 @@
 import torch
-from colors import blue, red, highlight
+from util.colors import blue, red, highlight
 
 
 def gpu_check():
