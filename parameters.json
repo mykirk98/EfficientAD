@@ -1,0 +1,34 @@
+{
+    "dataset": {
+        "MVTec_AD": {
+            "path": "/home/msis/Work/dataset/MVTec_AD",
+            "class": [
+                "bottle",
+                "cable",
+                "capsule",
+                "carpet",
+                "grid",
+                "hazelnut",
+                "leather",
+                "metal_nut",
+                "pill",
+                "screw",
+                "tile",
+                "toothbrush",
+                "transistor",
+                "wood",
+                "zipper"
+            ]
+        },
+        "MVTec_LOCO_AD": {
+            "path": "/home/msis/Work/dataset/MVTec_AD_LOCO",
+            "class": [
+                "breakfast_box",
+                "juice_bottle",
+                "pushpins",
+                "screw_bag",
+                "splicing_connectors"
+            ]
+        }
+    }
+}
