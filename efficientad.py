@@ -12,6 +12,7 @@ from sklearn.metrics import roc_auc_score
 from util.hardware import gpu_check
 from util.parser_ import get_argparse
 from util.save_MVTec_AD import save_original_and_anom_map, save_original_and_anom_map_and_mask
+from util.figure import loss_figure
 from PIL import Image
 
 
@@ -170,10 +171,8 @@ def main():
         dataset_path = config.mvtec_loco_path
     else:
         raise Exception('Unknown config.dataset')
-
-    pretrain_penalty = True
-    if config.imagenet_train_path == 'none':
-        pretrain_penalty = False
+    
+    pretrain_penalty = True if config.imagenet_train_path != 'none' else False
 
     # create output dir
     train_output_dir = os.path.join(config.output_dir, 'trainings', config.dataset, config.subdataset)
@@ -248,6 +247,8 @@ def main():
     optimizer = torch.optim.Adam(itertools.chain(student.parameters(), autoencoder.parameters()), lr=1e-4, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(0.95 * config.train_steps), gamma=0.1)
     
+    losses = []
+    auces = []
     tqdm_obj = tqdm(range(config.train_steps))
     for iteration, (image_st, image_ae), image_penalty in zip(
             tqdm_obj, train_loader_infinite, penalty_loader_infinite):
@@ -284,6 +285,7 @@ def main():
         loss_ae = torch.mean(distance_ae)
         loss_stae = torch.mean(distance_stae)
         loss_total = loss_st + loss_ae + loss_stae
+        losses.append(loss_total.item())
 
         optimizer.zero_grad()
         loss_total.backward()
@@ -314,17 +316,21 @@ def main():
                         teacher_std=teacher_std, q_st_start=q_st_start,
                         q_st_end=q_st_end, q_ae_start=q_ae_start, q_ae_end=q_ae_end,
                         test_output_dir=None, desc='Intermediate inference')
+            auces.append(auc)
             print('Intermediate image auc: {:.4f}'.format(auc))
 
             # teacher frozen
             teacher.eval()
             student.train()
             autoencoder.train()
-
+    
     teacher.eval()
     student.eval()
     autoencoder.eval()
 
+    #TODO: 손실함수 그래프 그리기
+    # loss_figure(array=losses, dst_fp=train_output_dir)
+    
     torch.save(teacher, os.path.join(train_output_dir, 'teacher_final.pth'))
     torch.save(student, os.path.join(train_output_dir, 'student_final.pth'))
     torch.save(autoencoder, os.path.join(train_output_dir, 'autoencoder_final.pth'))
