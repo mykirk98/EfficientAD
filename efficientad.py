@@ -5,15 +5,14 @@ import torch, cv2
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
-import tifffile
 import os, random, itertools
-from common import get_autoencoder, get_pdn_small, get_pdn_medium, ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
+from common import get_autoencoder, get_pdn_medium, ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
 from sklearn.metrics import roc_auc_score
 from util.hardware import gpu_check, load_json
 from util.parser_ import get_argparse
 from util.save_MVTec_AD import save_original_and_anom_map, save_original_and_anom_map_and_mask
 from util.figure import loss_figure
-from PIL import Image
+from neuralNetwork.pdn import PDNs
 
 
 # constants
@@ -223,8 +222,8 @@ def main():
 
     # create models
     if args.model_size == 'small':
-        teacher = get_pdn_small(out_channels)
-        student = get_pdn_small(2 * out_channels)
+        teacher = PDNs(out_channels)
+        student = PDNs(2 * out_channels)
     elif args.model_size == 'medium':
         teacher = get_pdn_medium(out_channels)
         student = get_pdn_medium(2 * out_channels)
