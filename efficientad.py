@@ -6,13 +6,13 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 import os, random, itertools
-from common import get_autoencoder, get_pdn_medium, ImageFolderWithoutTarget, ImageFolderWithPath, InfiniteDataloader
+from common import *
 from sklearn.metrics import roc_auc_score
 from util.hardware import gpu_check, load_json
 from util.parser_ import get_argparse
-from util.save_MVTec_AD import save_original_and_anom_map, save_original_and_anom_map_and_mask
+# from util.save_MVTec_AD import save_original_and_anom_map, save_original_and_anom_map_and_mask
 from util.figure import loss_figure
-from neuralNetwork.pdn import PDNs
+from neuralNetwork.pdn import PDNs, PDNm
 
 
 # constants
@@ -43,12 +43,10 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
     y_score = []
     
     for image, target, path in tqdm(test_set, desc=desc):
-        orig_width = image.width
-        orig_height = image.height
+        orig_width, orig_height = image.width, image.height
         image = default_transform(image)
         image = image[None]
-        if on_gpu:
-            image = image.cuda()
+        image = image.cuda() if on_gpu else image
         
         map_combined, map_st, map_ae = predict(image=image, teacher=teacher, student=student,
                                                 autoencoder=autoencoder, teacher_mean=teacher_mean,
@@ -108,8 +106,7 @@ def map_normalization(validation_loader, teacher, student, autoencoder,
     maps_ae = []
     # ignore augmented ae image
     for image, _ in tqdm(validation_loader, desc=desc):
-        if on_gpu:
-            image = image.cuda()
+        image = image.cuda() if on_gpu else image
         map_combined, map_st, map_ae = predict(image=image, teacher=teacher, student=student,
                                         autoencoder=autoencoder, teacher_mean=teacher_mean, teacher_std=teacher_std)
         maps_st.append(map_st)
@@ -131,8 +128,7 @@ def teacher_normalization(teacher, train_loader):
 
     mean_outputs = []
     for train_image, _ in tqdm(train_loader, desc='Computing mean of features'):
-        if on_gpu:
-            train_image = train_image.cuda()
+        train_image = train_image.cuda() if on_gpu else train_image
             
         teacher_output = teacher(train_image)
         mean_output = torch.mean(teacher_output, dim=[0, 2, 3])
@@ -143,8 +139,7 @@ def teacher_normalization(teacher, train_loader):
 
     mean_distances = []
     for train_image, _ in tqdm(train_loader, desc='Computing std of features'):
-        if on_gpu:
-            train_image = train_image.cuda()
+        train_image = train_image.cuda() if on_gpu else train_image
             
         teacher_output = teacher(train_image)
         distance = (teacher_output - channel_mean) ** 2
@@ -167,12 +162,6 @@ def main():
     args = get_argparse()
 
     dataset_path = config_file['dataset'][args.dataset]['path']
-    # if args.dataset == 'MVTec_AD':
-    #     dataset_path = args.mvtec_ad_path
-    # elif args.dataset == 'MVTec_LOCO_AD':
-    #     dataset_path = args.mvtec_loco_path
-    # else:
-    #     raise Exception('Unknown config.dataset')
     
     pretrain_penalty = True if args.imagenet_train_path != 'none' else False
 
@@ -224,9 +213,11 @@ def main():
     if args.model_size == 'small':
         teacher = PDNs(out_channels)
         student = PDNs(2 * out_channels)
+        # teacher = PDNs(out_channels, padding=True)    #FIXME: teacher output dimension : (1, 384, 64, 64)
+        # student = PDNs(2 * out_channels, padding=True)#FIXME: autoencoder output dimension : (1, 384, 56, 56)
     elif args.model_size == 'medium':
-        teacher = get_pdn_medium(out_channels)
-        student = get_pdn_medium(2 * out_channels)
+        teacher = PDNm(out_channels)
+        student = PDNm(2 * out_channels)
     else:
         raise Exception()
     
@@ -239,7 +230,7 @@ def main():
     student.train()
     autoencoder.train()
 
-    if on_gpu:
+    if on_gpu == True:
         teacher.cuda()
         student.cuda()
         autoencoder.cuda()
@@ -254,7 +245,7 @@ def main():
     tqdm_obj = tqdm(range(args.train_steps))
     for iteration, (image_st, image_ae), image_penalty in zip(
             tqdm_obj, train_loader_infinite, penalty_loader_infinite):
-        if on_gpu:
+        if on_gpu == True:
             image_st = image_st.cuda()
             image_ae = image_ae.cuda()
             if image_penalty is not None:
