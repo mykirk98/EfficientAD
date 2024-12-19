@@ -12,7 +12,7 @@ from util.hardware import gpu_check, load_json
 from util.parser_ import get_argparse
 # from util.save_MVTec_AD import save_original_and_anom_map, save_original_and_anom_map_and_mask
 from util.figure import loss_figure
-from neuralNetwork.pdn import PDNs, PDNm
+from neuralNetwork.pdn import *
 from neuralNetwork.autoEncoder import AutoEncoder
 
 
@@ -161,21 +161,19 @@ def main():
 
     config_file = load_json(fp='/home/msis/Work/anomalyDetector/EfficientAD/parameters.json')
     args = get_argparse()
-
     dataset_path = config_file['dataset'][args.dataset]['path']
-    
     pretrain_penalty = True if args.imagenet_train_path != 'none' else False
 
     # create output dir
-    train_output_dir = os.path.join(args.output_dir, 'trainings', args.dataset, args.subdataset)
-    test_output_dir = os.path.join(args.output_dir, 'anomaly_maps', args.dataset, args.subdataset, 'test')
+    train_output_dir = os.path.join(args.output_dir, 'trainings', args.dataset, args.category)
+    test_output_dir = os.path.join(args.output_dir, 'anomaly_maps', args.dataset, args.category, 'test')
     os.makedirs(train_output_dir, exist_ok=True)
     os.makedirs(test_output_dir, exist_ok=True)
 
     # load data
-    full_train_set = ImageFolderWithoutTarget(os.path.join(dataset_path, args.subdataset, 'train'),
+    full_train_set = ImageFolderWithoutTarget(os.path.join(dataset_path, args.category, 'train'),
                                             transform=transforms.Lambda(train_transform))
-    test_set = ImageFolderWithPath(os.path.join(dataset_path, args.subdataset, 'test'))
+    test_set = ImageFolderWithPath(os.path.join(dataset_path, args.category, 'test'))
     
     if args.dataset == 'MVTec_AD':
         # mvtec dataset paper recommend 10% validation set
@@ -185,7 +183,7 @@ def main():
         train_set, validation_set = torch.utils.data.random_split(full_train_set, [train_size,validation_size], rng)
     elif args.dataset == 'MVTec_LOCO_AD':
         train_set = full_train_set
-        validation_set = ImageFolderWithoutTarget(os.path.join(dataset_path, args.subdataset, 'validation'),
+        validation_set = ImageFolderWithoutTarget(os.path.join(dataset_path, args.category, 'validation'),
                                                 transform=transforms.Lambda(train_transform))
     else:
         raise Exception('Unknown config.dataset')
@@ -211,16 +209,7 @@ def main():
         penalty_loader_infinite = itertools.repeat(None)
 
     # create models
-    if args.model_size == 'small':
-        teacher = PDNs(out_channels)
-        student = PDNs(2 * out_channels)
-        # teacher = PDNs(out_channels, padding=True)    #FIXME: teacher output dimension : (1, 384, 64, 64)
-        # student = PDNs(2 * out_channels, padding=True)#FIXME: autoencoder output dimension : (1, 384, 56, 56)
-    elif args.model_size == 'medium':
-        teacher = PDNm(out_channels)
-        student = PDNm(2 * out_channels)
-    else:
-        raise Exception()
+    teacher, student = create_model(model_size=args.model_size, out_channels=out_channels)
     
     state_dict = torch.load(args.weights, map_location='cpu')
     teacher.load_state_dict(state_dict)
