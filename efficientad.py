@@ -169,9 +169,9 @@ def teacher_normalization(teacher, train_loader):
     channel_var = channel_var[None, :, None, None]
     channel_std = torch.sqrt(channel_var)
 
-    return channel_mean, channel_std
+    return channel_mean, channel_std    
 
-def main():
+if __name__ == '__main__':
     gpu_check()
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -347,6 +347,3 @@ def main():
         q_ae_start=q_ae_start, q_ae_end=q_ae_end,
         test_output_dir=test_output_dir, desc='Final inference')
     print('Final image auc: {:.4f}'.format(auc))
-
-if __name__ == '__main__':
-    main()
