@@ -85,6 +85,24 @@ def test(test_set, teacher, student, autoencoder, teacher_mean, teacher_std,
 @torch.no_grad()
 def predict(image, teacher, student, autoencoder, teacher_mean, teacher_std,
                                     q_st_start=None, q_st_end=None, q_ae_start=None, q_ae_end=None):
+    """
+    Args:
+        imge (torch.Tensor): input image
+        teacher (torch.nn.Module): teacher model
+        student (torch.nn.Module): student model
+        autoencoder (torch.nn.Module): autoencoder model
+        teacher_mean (torch.Tensor): mean of teacher output
+        teacher_std (torch.Tensor): std of teacher output
+        q_st_start (torch.Tensor): start quantile of student map
+        q_st_end (torch.Tensor): end quantile of student map
+        q_ae_start (torch.Tensor): start quantile of autoencoder map
+        q_ae_end (torch.Tensor): end quantile of autoencoder map
+    
+    Returns:
+        map_combined (torch.Tensor): combined map
+        map_st (torch.Tensor): student map
+        map_ae (torch.Tensor): autoencoder map
+    """
     teacher_output = teacher(image)
     teacher_output = (teacher_output - teacher_mean) / teacher_std
     student_output = student(image)
