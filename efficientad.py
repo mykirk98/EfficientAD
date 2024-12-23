@@ -14,7 +14,7 @@ from util.parser_ import get_argparse
 from util.figure import loss_figure
 from neuralNetwork.pdn import *
 from neuralNetwork.autoEncoder import AutoEncoder
-
+from src.teacher import teacher_normalization
 
 # constants
 seed = 42
@@ -118,8 +118,13 @@ def predict(image: torch.Tensor, teacher: nn.Sequential, student: nn.Sequential,
     else:
         q_st_start, q_st_end, q_ae_start, q_ae_end = None, None, None, None
     
+    # Normalize teacher output
     teacher_output = teacher(image)
-    teacher_output = (teacher_output - teacher_mean) / teacher_std
+    # teacher_output = (teacher_output - teacher_mean) / teacher_std
+    teacher_output -= teacher_mean
+    teacher_output /= teacher_std
+    
+    # student and autoencoder output
     student_output = student(image)
     autoencoder_output = autoencoder(image)
     
@@ -176,45 +181,6 @@ def map_normalization(validation_loader: DataLoader, teacher: nn.Sequential, stu
     
     return q_st_start, q_st_end, q_ae_start, q_ae_end
 
-@torch.no_grad()
-def teacher_normalization(teacher: nn.Sequential, train_loader: DataLoader):
-    """
-    Args:
-        teacher (nn.Sequential): teacher model
-        train_loader (DataLoader): training data loader
-    
-    Returns:
-        channel_mean (torch.Tensor): mean of channel
-        channel_std (torch.Tensor): standard deviation of channel
-    """
-    # compute mean
-    mean_outputs = []
-    for train_image, _ in tqdm(train_loader, desc='Computing mean of features'):
-        train_image = train_image.cuda() if on_gpu else train_image
-            
-        teacher_output = teacher(train_image)
-        mean_output = torch.mean(teacher_output, dim=[0, 2, 3])
-        mean_outputs.append(mean_output)
-        
-    channel_mean = torch.mean(torch.stack(mean_outputs), dim=0)
-    channel_mean = channel_mean[None, :, None, None]
-
-    # compute standard deviation
-    mean_distances = []
-    for train_image, _ in tqdm(train_loader, desc='Computing std of features'):
-        train_image = train_image.cuda() if on_gpu else train_image
-            
-        teacher_output = teacher(train_image)
-        distance = (teacher_output - channel_mean) ** 2
-        mean_distance = torch.mean(distance, dim=[0, 2, 3])
-        mean_distances.append(mean_distance)
-        
-    channel_var = torch.mean(torch.stack(mean_distances), dim=0)
-    channel_var = channel_var[None, :, None, None]
-    channel_std = torch.sqrt(channel_var)
-
-    return channel_mean, channel_std
-
 if __name__ == '__main__':
     gpu_check()
     torch.manual_seed(seed)
@@ -241,7 +207,7 @@ if __name__ == '__main__':
         # mvtec dataset paper recommend 10% validation set
         train_size = int(0.9 * len(full_train_set))
         validation_size = len(full_train_set) - train_size
-        rng = torch.Generator().manual_seed(seed)
+        rng = torch.Generator().manual_seed(seed)       #NOTE: rng: random number generator
         train_set, validation_set = torch.utils.data.random_split(full_train_set, [train_size,validation_size], rng)
     elif args.dataset == 'MVTec_LOCO_AD':
         train_set = full_train_set
@@ -273,7 +239,7 @@ if __name__ == '__main__':
     # create models
     teacher, student = create_model(model_size=args.model_size, out_channels=out_channels)
     
-    state_dict = torch.load(args.weights, map_location='cpu')
+    state_dict = torch.load(args.weights, map_location='cpu', weights_only=True)
     teacher.load_state_dict(state_dict)
     autoencoder = AutoEncoder(out_channels)
 
@@ -287,7 +253,7 @@ if __name__ == '__main__':
         student.cuda()
         autoencoder.cuda()
 
-    teacher_mean, teacher_std = teacher_normalization(teacher, train_loader)
+    teacher_mean, teacher_std = teacher_normalization(teacher=teacher, train_loader=train_loader)
 
     optimizer = torch.optim.Adam(itertools.chain(student.parameters(), autoencoder.parameters()), lr=1e-4, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(0.95 * args.train_steps), gamma=0.1)
