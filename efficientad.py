@@ -15,6 +15,7 @@ from util.figure import loss_figure
 from neuralNetwork.pdn import *
 from neuralNetwork.autoEncoder import AutoEncoder
 from src.teacher import teacher_normalization
+from src.compute import test, predict
 
 # constants
 seed = 42
@@ -32,112 +33,10 @@ transform_ae = transforms.RandomChoice([
     transforms.ColorJitter(brightness=0.2),
     transforms.ColorJitter(contrast=0.2),
     transforms.ColorJitter(saturation=0.2)
-])
+])      #NOTE: Algorithm 1. line 23~28  #FIXME: 논문과 구현이 살짝 다름, line23이 구현안됨
 
 def train_transform(image):
     return default_transform(image), default_transform(transform_ae(image))
-
-def test(test_set: DataLoader, teacher, student, autoencoder, teacher_mean, teacher_std,
-            quantiles: None|tuple=None,
-            test_output_dir: str=None, desc='Running inference'):
-    """
-    Args:
-        test_set (DataLoader): test data loader
-        teacher (nn.Sequential): teacher model
-        student (nn.Sequential): student model
-        autoencoder (nn.Sequential): autoencoder model
-        teacher_mean (torch.Tensor): mean of teacher output
-        teacher_std (torch.Tensor): standard deviation of teacher output
-        quantiles (None|tuple): quantiles for normalization, include q_st_start, q_st_end, q_ae_start, q_ae_end
-        test_output_dir (str): directory to save test output
-        desc (str): description for tqdm
-    
-    Returns:
-        auc (float): area under the curve
-    """
-    y_true = []
-    y_score = []
-    
-    for image, target, path in tqdm(test_set, desc=desc):
-        orig_width, orig_height = image.width, image.height
-        image = default_transform(image)
-        image = image[None]
-        image = image.cuda() if on_gpu else image
-        
-        map_combined, map_st, map_ae = predict(image=image, teacher=teacher, student=student,
-                                                autoencoder=autoencoder, teacher_mean=teacher_mean, teacher_std=teacher_std,
-                                                # q_st_start=q_st_start, q_st_end=q_st_end, q_ae_start=q_ae_start, q_ae_end=q_ae_end)
-                                                quantiles=quantiles)
-        
-        map_combined = torch.nn.functional.pad(map_combined, (4, 4, 4, 4))
-        map_combined = torch.nn.functional.interpolate(map_combined, (orig_height, orig_width), mode='bilinear')
-        map_combined = map_combined[0, 0].cpu().numpy()
-
-        defect_class = os.path.basename(os.path.dirname(path))
-        if test_output_dir is not None:
-            # img_nm = os.path.split(path)[1].split('.')[0]
-            if not os.path.exists(os.path.join(test_output_dir, defect_class)):
-                os.makedirs(os.path.join(test_output_dir, defect_class))
-            
-            map_combined = (map_combined) / (np.max(map_combined) - np.min(map_combined)) * 255
-            # original_image_path = path
-            # file = os.path.join(test_output_dir, defect_class, img_nm + '.png')
-            
-            # if defect_class == 'good':
-            #     save_original_and_anom_map(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
-            # else:
-            #     save_original_and_anom_map_and_mask(src_fp=original_image_path, dst_fp=file, anom_arr=map_combined)
-            # cv2.imwrite(filename=file, img=map_combined)    #FIXME: activate when test mode
-
-        y_true_image = 0 if defect_class == 'good' else 1
-        y_score_image = np.max(map_combined)
-        y_true.append(y_true_image)
-        y_score.append(y_score_image)
-        
-    auc = roc_auc_score(y_true=y_true, y_score=y_score) * 100
-    return auc
-
-@torch.no_grad()    #TODO: image: torch.Tensor는 언제 torch.Tensor로 변환되었는지 확인하기
-def predict(image: torch.Tensor, teacher: nn.Sequential, student: nn.Sequential, autoencoder: nn.Sequential,
-            teacher_mean: torch.Tensor, teacher_std: torch.Tensor,
-            quantiles: None|tuple=None):
-    """
-    Args:
-        imge (torch.Tensor): input image
-        teacher (nn.Sequential): teacher model
-        student (nn.Sequential): student model
-        autoencoder (nn.Sequential): autoencoder model
-        
-    Returns:
-        map_combined (torch.Tensor): combined map
-        map_st (torch.Tensor): student map
-        map_ae (torch.Tensor): autoencoder map
-    """
-    if quantiles is not None:
-        q_st_start, q_st_end, q_ae_start, q_ae_end = quantiles
-    else:
-        q_st_start, q_st_end, q_ae_start, q_ae_end = None, None, None, None
-    
-    # Normalize teacher output
-    teacher_output = teacher(image)
-    # teacher_output = (teacher_output - teacher_mean) / teacher_std
-    teacher_output -= teacher_mean
-    teacher_output /= teacher_std
-    
-    # student and autoencoder output
-    student_output = student(image)
-    autoencoder_output = autoencoder(image)
-    
-    map_st = torch.mean((teacher_output - student_output[:, :out_channels])**2, dim=1, keepdim=True)
-    map_ae = torch.mean((autoencoder_output - student_output[:, out_channels:])**2, dim=1, keepdim=True)
-    
-    if q_st_start is not None:
-        map_st = 0.1 * (map_st - q_st_start) / (q_st_end - q_st_start)
-    if q_ae_start is not None:
-        map_ae = 0.1 * (map_ae - q_ae_start) / (q_ae_end - q_ae_start)
-    map_combined = 0.5 * map_st + 0.5 * map_ae
-    
-    return map_combined, map_st, map_ae
 
 @torch.no_grad()        #FIXME: arguments들이 너무 많음
 def map_normalization(validation_loader: DataLoader, teacher: nn.Sequential, student: nn.Sequential, autoencoder: nn.Sequential,   #TODO: teacher, student, autoencoder 결합하여 하나의 변수 인자로 받기
@@ -239,8 +138,8 @@ if __name__ == '__main__':
     # create models
     teacher, student = create_model(model_size=args.model_size, out_channels=out_channels)
     
-    state_dict = torch.load(args.weights, map_location='cpu', weights_only=True)
-    teacher.load_state_dict(state_dict)
+    teacher_pretrained_weight = torch.load(args.weights, map_location='cpu', weights_only=True)
+    teacher.load_state_dict(teacher_pretrained_weight)
     autoencoder = AutoEncoder(out_channels)
 
     # teacher frozen
@@ -253,16 +152,16 @@ if __name__ == '__main__':
         student.cuda()
         autoencoder.cuda()
 
-    teacher_mean, teacher_std = teacher_normalization(teacher=teacher, train_loader=train_loader)
+    teacher_mean, teacher_std = teacher_normalization(teacher=teacher, train_loader=train_loader)   # NOTE: Algorithm 1. line 3~9
 
-    optimizer = torch.optim.Adam(itertools.chain(student.parameters(), autoencoder.parameters()), lr=1e-4, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(0.95 * args.train_steps), gamma=0.1)
+    optimizer = torch.optim.Adam(itertools.chain(student.parameters(), autoencoder.parameters()), lr=1e-4, weight_decay=1e-5)   #NOTE: Algorithm 1. line 11
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(0.95 * args.train_steps), gamma=0.1)   # 66500 / 70000 = 0.95
     
-    losses = []
-    auces = []
+    # losses = []
+    # auces = []
     tqdm_obj = tqdm(range(args.train_steps))
     for iteration, (image_st, image_ae), image_penalty in zip(
-            tqdm_obj, train_loader_infinite, penalty_loader_infinite):
+            tqdm_obj, train_loader_infinite, penalty_loader_infinite):  #NOTE: Algorithm 1. line 12
         if on_gpu == True:
             image_st = image_st.cuda()
             image_ae = image_ae.cuda()
@@ -270,33 +169,34 @@ if __name__ == '__main__':
                 image_penalty = image_penalty.cuda()
         
         with torch.no_grad():
-            teacher_output_st = teacher(image_st)
-            teacher_output_st = (teacher_output_st - teacher_mean) / teacher_std
+            teacher_output_st = teacher(image_st)   # (1, 384, 56, 56) teacher output for student   #NOTE: Algorithm 1. line 14
+            teacher_output_st = (teacher_output_st - teacher_mean) / teacher_std    # (1, 384, 56, 56) Normalized   #NOTE: Algorithm 1. line 15
         
-        student_output_st = student(image_st)[:, :out_channels]
-        distance_st = (teacher_output_st - student_output_st) ** 2
-        d_hard = torch.quantile(distance_st, q=0.999)
-        loss_hard = torch.mean(distance_st[distance_st >= d_hard])
+        student_output_st = student(image_st)[:, :out_channels, :, :]   # (1, 384, 56, 56)  student output for teacher  #NOTE: Algorithm 1. line 17
+        distance_st = (teacher_output_st - student_output_st) ** 2  # (1, 384, 56, 56)  #NOTE: Algorithm 1. line 18
+        d_hard = torch.quantile(distance_st, q=0.999)   #NOTE: Algorithm 1. line 19
+        loss_hard = torch.mean(distance_st[distance_st >= d_hard])  #NOTE: Algorithm 1. line 20
 
-        if image_penalty is not None:
+        if image_penalty is not None:   #NOTE: Algorithm 1. line 21~22
             student_output_penalty = student(image_penalty)[:, :out_channels]
             loss_penalty = torch.mean(student_output_penalty**2)
             loss_st = loss_hard + loss_penalty
         else:
             loss_st = loss_hard
 
-        ae_output = autoencoder(image_ae)
+        ae_output = autoencoder(image_ae)   #CONTINUE:  #NOTE: Algorithm 1. line 29
         with torch.no_grad():
-            teacher_output_ae = teacher(image_ae)
-            teacher_output_ae = (teacher_output_ae - teacher_mean) / teacher_std
+            teacher_output_ae = teacher(image_ae)   #NOTE: Algorithm 1. line 30
+            teacher_output_ae = (teacher_output_ae - teacher_mean) / teacher_std    #NOTE: Algorithm 1. line 31
         
-        student_output_ae = student(image_ae)[:, out_channels:]
-        distance_ae = (teacher_output_ae - ae_output)**2
-        distance_stae = (ae_output - student_output_ae)**2
-        loss_ae = torch.mean(distance_ae)
-        loss_stae = torch.mean(distance_stae)
-        loss_total = loss_st + loss_ae + loss_stae
-        losses.append(loss_total.item())
+        student_output_ae = student(image_ae)[:, out_channels:, :, :] #NOTE: Algorithm 1. line 32, 33
+        distance_ae = (teacher_output_ae - ae_output)**2    #NOTE: Algorithm 1. line 34
+        distance_stae = (ae_output - student_output_ae)**2  #NOTE: Algorithm 1. line 35
+        loss_ae = torch.mean(distance_ae)   #NOTE: Algorithm 1. line 36
+        loss_stae = torch.mean(distance_stae)   #NOTE: Algorithm 1. line 37
+        loss_total = loss_st + loss_ae + loss_stae  #NOTE: Algorithm 1. line 38
+        # losses.append(loss_total.item())
+
 
         optimizer.zero_grad()
         loss_total.backward()
@@ -306,34 +206,34 @@ if __name__ == '__main__':
         if iteration % 10 == 0:
             tqdm_obj.set_description("Current loss: {:.4f}  ".format(loss_total.item()))
 
-        # if iteration % 1000 == 0:
-        #     torch.save(teacher, os.path.join(train_output_dir, 'teacher_tmp.pth'))
-        #     torch.save(student, os.path.join(train_output_dir, 'student_tmp.pth'))
-        #     torch.save(autoencoder, os.path.join(train_output_dir, 'autoencoder_tmp.pth'))
+        if iteration % 1000 == 0:
+            torch.save(teacher, os.path.join(train_output_dir, 'teacher_tmp.pth'))
+            torch.save(student, os.path.join(train_output_dir, 'student_tmp.pth'))
+            torch.save(autoencoder, os.path.join(train_output_dir, 'autoencoder_tmp.pth'))
 
-        # if iteration % 10000 == 0 and iteration > 0:
-        #     # run intermediate evaluation
-        #     teacher.eval()
-        #     student.eval()
-        #     autoencoder.eval()
+        if iteration % 10000 == 0 and iteration > 0:
+            # run intermediate evaluation
+            teacher.eval()
+            student.eval()
+            autoencoder.eval()
 
-        #     q_st_start, q_st_end, q_ae_start, q_ae_end = map_normalization(
-        #                                                     validation_loader=validation_loader, teacher=teacher,
-        #                                                     student=student, autoencoder=autoencoder,
-        #                                                     teacher_mean=teacher_mean, teacher_std=teacher_std,
-        #                                                     desc='Intermediate map normalization')
-        #     auc = test(test_set=test_set, teacher=teacher, student=student,
-        #                 autoencoder=autoencoder, teacher_mean=teacher_mean,
-        #                 teacher_std=teacher_std, q_st_start=q_st_start,
-        #                 q_st_end=q_st_end, q_ae_start=q_ae_start, q_ae_end=q_ae_end,
-        #                 test_output_dir=None, desc='Intermediate inference')
-        #     auces.append(auc)
-        #     print('Intermediate image auc: {:.4f}'.format(auc))
+            q_st_start, q_st_end, q_ae_start, q_ae_end = map_normalization(
+                                                            validation_loader=validation_loader, teacher=teacher,
+                                                            student=student, autoencoder=autoencoder,
+                                                            teacher_mean=teacher_mean, teacher_std=teacher_std,
+                                                            desc='Intermediate map normalization')      #NOTE: Algorithm 1. line 46~51
+            auc = test(test_set=test_set, teacher=teacher, student=student,
+                        autoencoder=autoencoder, teacher_mean=teacher_mean,
+                        teacher_std=teacher_std, q_st_start=q_st_start,
+                        q_st_end=q_st_end, q_ae_start=q_ae_start, q_ae_end=q_ae_end,
+                        test_output_dir=None, desc='Intermediate inference')    #NOTE:L Algorithm 1. line 52~55
+            # auces.append(auc)
+            print('Intermediate image auc: {:.4f}'.format(auc))
 
-        #     # teacher frozen
-        #     teacher.eval()
-        #     student.train()
-        #     autoencoder.train()
+            # teacher frozen
+            teacher.eval()
+            student.train()
+            autoencoder.train()
     
     teacher.eval()
     student.eval()
@@ -346,6 +246,9 @@ if __name__ == '__main__':
     torch.save(student, os.path.join(train_output_dir, 'student_final.pth'))
     torch.save(autoencoder, os.path.join(train_output_dir, 'autoencoder_final.pth'))
 
+
+
+    # Inference Procedure
     quantiles = map_normalization(
         validation_loader=validation_loader, teacher=teacher, student=student,
         autoencoder=autoencoder, teacher_mean=teacher_mean,
