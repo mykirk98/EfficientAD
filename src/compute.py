@@ -7,7 +7,7 @@ import numpy as np
 import cv2
 from src.data import basic_transform
 from torch import nn
-from util.hardware import load_json
+from parameters import *
 
 @torch.no_grad()    #TODO: image: torch.Tensor는 언제 torch.Tensor로 변환되었는지 확인하기
 def predict(image: torch.Tensor, teacher: nn.Sequential, student: nn.Sequential, autoencoder: nn.Sequential,
@@ -25,9 +25,6 @@ def predict(image: torch.Tensor, teacher: nn.Sequential, student: nn.Sequential,
         map_st (torch.Tensor): student map
         map_ae (torch.Tensor): autoencoder map
     """
-
-    json_file = load_json(fp='/home/msis/Work/anomalyDetector/EfficientAD/parameters.json')
-    output_channels = json_file['output_channels']
     
     if quantiles is not None:
         q_st_start, q_st_end, q_ae_start, q_ae_end = quantiles
@@ -54,8 +51,6 @@ def predict(image: torch.Tensor, teacher: nn.Sequential, student: nn.Sequential,
     map_combined = 0.5 * map_st + 0.5 * map_ae
     
     return map_combined, map_st, map_ae
-
-
 
 def test(test_set: DataLoader, teacher, student, autoencoder, teacher_mean, teacher_std,
             quantiles: None|tuple=None,
