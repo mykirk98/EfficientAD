@@ -13,7 +13,6 @@ def get_argparse():
     parser.add_argument('--model_size', dest='model_size', type=str, default='small', choices=['small', 'medium'])
     parser.add_argument('--weights', dest='weights', type=str, default='models/teacher_small.pth')
     parser.add_argument('--imagenet_train_path', dest='imagenet_train_path', type=str, default='none', help='Set to "none" to disable ImageNet pretraining penalty. Or see README.md to download ImageNet and set to ImageNet path')
-    parser.add_argument('--train_steps', dest='train_steps', type=int, default=70000)
     
     args = parser.parse_args()
     
@@ -23,6 +22,5 @@ def get_argparse():
     print(f"model_size : {magenta(args.model_size)}")
     print(f"weights : {yellow(args.weights)}")
     print(f"imagenet_train_path : {magenta(args.imagenet_train_path)}")
-    print(f"train_steps : {yellow(args.train_steps)}")
     
     return parser.parse_args()

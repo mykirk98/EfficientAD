@@ -21,12 +21,11 @@
                 "--dataset",                "MVTec_AD",
                 "--category",               "grid",
                 "--output_dir",             "./output/dim64",
-                // "--model_size",             "small",
-                "--model_size",             "medium",
-                // "--weights",                "./models/teacher_small.pth",
-                "--weights",                "./models/teacher_medium.pth",
-                "--imagenet_train_path",    "none",
-                "--train_steps",            "10"
+                "--model_size",              "small",
+                // "--model_size",             "medium",
+                "--weights",                "./models/teacher_small.pth",
+                // "--weights",                "./models/teacher_medium.pth",
+                "--imagenet_train_path",    "none"
             ]
         }
     ]

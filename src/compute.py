@@ -55,7 +55,7 @@ def predict(image: torch.Tensor, teacher: nn.Sequential, student: nn.Sequential,
 def test(test_set: DataLoader, teacher, student, autoencoder, teacher_mean, teacher_std,
             quantiles: None|tuple=None,
             test_output_dir: str=None, desc='Running inference'):
-    """ #TODO: quantile들이 어떻게 사용되는지 확인하기
+    """
     Args:
         test_set (DataLoader): test data loader
         teacher (nn.Sequential): teacher model

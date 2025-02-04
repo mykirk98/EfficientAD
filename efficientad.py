@@ -130,11 +130,11 @@ if __name__ == '__main__':
     teacher_mean, teacher_std = teacher_normalization(teacher=teacher, train_loader=train_loader)   # NOTE: Algorithm 1. line 3~9
 
     optimizer = torch.optim.Adam(itertools.chain(student.parameters(), autoencoder.parameters()), lr=1e-4, weight_decay=1e-5)   #NOTE: Algorithm 1. line 11
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(0.95 * args.train_steps), gamma=0.1)   # 66500 / 70000 = 0.95
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=int(0.95 * train_steps), gamma=0.1)   # 66500 / 70000 = 0.95
     
     # losses = []
     # auces = []
-    tqdm_obj = tqdm(range(args.train_steps))
+    tqdm_obj = tqdm(range(train_steps))
     for iteration, (image_st, image_ae), image_penalty in zip(
             tqdm_obj, train_loader_infinite, penalty_loader_infinite):  #NOTE: Algorithm 1. line 12
         if torch.cuda.is_available() == True:
@@ -198,7 +198,7 @@ if __name__ == '__main__':
                         q_st_end=q_st_end, q_ae_start=q_ae_start, q_ae_end=q_ae_end,
                         test_output_dir=None, desc='Intermediate inference')    #NOTE:L Algorithm 1. line 52~55
             # auces.append(auc)
-            print('Intermediate image auc: {:.4f}'.format(auc))
+            print(f'Intermediate image auc: {auc:.4f}')
 
             # teacher frozen
             teacher.eval()
@@ -228,4 +228,4 @@ if __name__ == '__main__':
         autoencoder=autoencoder, teacher_mean=teacher_mean, teacher_std=teacher_std,
         quantiles=quantiles,
         test_output_dir=test_output_dir, desc='Final inference')
-    print('Final image auc: {:.4f}'.format(auc))
+    print(f'Final image auc: {auc:.4f}')
